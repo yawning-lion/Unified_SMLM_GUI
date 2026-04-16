@@ -1,0 +1,866 @@
+#!/usr/bin/python
+#
+## @file
+#
+# Stage and offset detector thread classes
+#
+# This is the hardware interface for a  focus lock based 
+# on some sort of Z positioner and a position readout of 
+# the lock target.
+#
+# The control_thread has the following methods:
+#
+# cleanup()
+#    Perform any cleanup that needs to be done prior to quitting.
+#
+# getLockTarget()
+#    Returns the current lock target in QPD units.
+#
+# findSumSignal()
+#    Finds sum signal, if it is too low, otherwise does nothing.
+#
+# moveStageAbs(pos)
+#    Moves the stage to the position (in um) given by pos
+#
+# moveStageRel(size)
+#    Moves the stage relative to it current position by size um.
+#
+# newZCenter(center)
+#    Sets the position the stage returns when the lock stops (in um).
+#
+# recenter()
+#    Move the stage back to its center position.
+#
+# recenterPiezo()
+#    Center the piezo with the focus motor, if available.
+#
+# setStage(stage)
+#    Replace current stage control class with class instance stage.
+#
+# setTarget()
+#    Set the lock target in QPD units.
+#
+# start()
+#    Start any threads that are needed for the focus lock.
+#
+# startLock()
+#    Start the focus lock.
+#
+# stopLock()
+#    Stop the focus lock.
+#
+# stopThread()
+#    Stop any threads that are running in preparation for quitting.
+#
+# wait()
+#    Return once all running threads have stopped.
+#
+#
+# The control_thread class should emit the following signal when it has
+# new QPD/stage position data.
+#
+# controlUpdate(float x_offset, float y_offset, float power, float stage_z)
+#
+#
+# Hazen 12/12
+#
+# Jeff 9/14: Added focus lock buffers to track performance to determine if locked
+
+# waitForAcknowledgement  decrease wait time to 2ms
+
+from PyQt5 import QtCore
+from collections import deque 
+import numpy 
+import time
+
+import nidaqmx
+from nidaqmx.constants import AcquisitionType, LineGrouping,Level
+
+
+# Debugging
+import sc_library.hdebug as hdebug
+
+## StageQPDThread
+#
+# QPD monitoring and stage control thread.
+#
+# This is a PyQt thread for controlling the z stage position
+# and getting the current position reading from the QPD.
+#
+# stage is a class with the following methods:
+#
+#   zMoveTo(z)
+#      Move the stage to position z in um.
+#
+#   shutDown()
+#      Perform whatever cleanup is necessary to stop the stage cleanly
+#
+#
+# qpd is a class with the following methods:
+#
+#   qpdScan()
+#      Return the current reading from the QPD in a list
+#      [power, x_offset, y_offset]
+#
+#   shutDown()
+#      Perform whatever cleanup is necessary to stop the qpd cleanly
+#
+#
+# lock_fn is a function that takes a single number (the QPD error signal)
+#   and returns the appropriate response (in um) by the stage.
+#
+class StageQPDThread(QtCore.QThread):
+    controlUpdate = QtCore.pyqtSignal(float, float, float, float, bool)
+    foundSum = QtCore.pyqtSignal(float)
+    lockStatusRequest = QtCore.pyqtSignal(bool)
+    recenteredPiezo = QtCore.pyqtSignal()
+    moveComplete = QtCore.pyqtSignal()  
+    scanningSignal = QtCore.pyqtSignal(bool)
+
+    ## __init__
+    #
+    # @param qpd A QPD like object.
+    # @param stage A piezo stage control object.
+    # @param lock_fn A function to use in the focus feedback correction loop.
+    # @param min_sum The sum below which QPD signal will be considered to have been lost.
+    # @param z_center The center position of the piezo.
+    # @param buffer_length The length of the buffers to determine focus lock/performance.
+    # @param offset_thresh The minimum difference between the lock and offset to be considered locked.
+    # @param slow_stage (Optional) True/False is communication with the piezo stage slow.
+    # @param parent (Optional) The PyQt parent of this object.
+    #
+    @hdebug.debug
+    def __init__(self, qpd, stage, lock_fn, min_sum, z_center, buffer_length, offset_thresh, slow_stage = False, parent = None):
+        super().__init__(parent)
+        self.qpd = qpd
+        self.stage = stage
+        self.lock_fn = lock_fn
+        self.sum_min = min_sum
+
+        self.count = 0
+        self.debug = 1
+        self.find_sum = False
+        self.locked = 0
+        self.max_pos = 0
+        self.max_sum = 0
+        self.offset = 0
+        self.qpd_mutex = QtCore.QMutex()
+        self.running = 1
+        self.slow_stage = slow_stage
+        self.stage_mutex = QtCore.QMutex()
+
+        self.stage_z = self.stage.zPos()
+        self.sum = 0
+        self.target = None
+        self.target0 = 0.0
+        self.targetEnd = 0.0
+        self.unacknowledged = 1
+        self.z_center = z_center
+        self.stopScan = False
+
+        self.requested_sum = 0
+
+        self.buffer_length = buffer_length
+        self.offset_thresh = offset_thresh
+        self.sum_thresh = self.sum_min
+        self.is_locked_buffer = deque([False]*self.buffer_length)
+        self.is_locked = False
+        
+        
+        # center the stage
+        # self.newZCenter(z_center)
+
+    ## cleanUp
+    #
+    # Shutdown the QPD and the piezo stage.
+    #
+    @hdebug.debug
+    def cleanUp(self):
+        self.qpd.shutDown()
+        self.stage.shutDown()
+
+    ## getLockTarget
+    #
+    # @return The current focus lock target
+    #
+    @hdebug.debug
+    def getLockTarget(self):
+        if self.qpd_mutex.tryLock(1000):
+            target = self.target
+            self.qpd_mutex.unlock()
+            return target
+        else:
+            print("QPD/Camera are frozen?")
+            return "failed"
+
+    ## getOffset
+    #
+    # @return The current focus lock value.
+    #
+    @hdebug.debug
+    def getOffset(self):
+        self.qpd_mutex.lock()
+        temp = self.offset
+        self.qpd_mutex.unlock()
+        return temp
+
+    ## getFocusStatus()
+    #
+    # @return The status of the focus lock
+    #
+    @hdebug.debug
+    def getFocusStatus(self):
+        if self.qpd_mutex.tryLock(1000):
+            is_locked = self.is_locked
+            self.qpd_mutex.unlock()
+            return is_locked
+        else:
+            print("QPD/Camera are frozen?")
+            return "failed"
+
+    ## findSumSignal
+    #
+    # If sum signal is below a threshold start the sum signal search,
+    # otherwise emit the foundSum signal.
+    #
+    @hdebug.debug
+    def findSumSignal(self, min_sum):
+        if (self.sum < min_sum):  ## Hack
+            self.requested_sum = min_sum
+            self.qpd_mutex.lock()
+            self.find_sum = True
+            self.max_sum = 0
+            self.max_pos = 0
+            self.moveStageAbs(0)
+            self.resetBuffer()
+            self.qpd_mutex.unlock()
+        else:
+            self.foundSum.emit(self.sum)
+
+    ## moveStageAbs
+    #
+    # @param new_z The desired stage z position.
+    #
+    def moveStageAbs(self, new_z, cSignal_emit=False):
+        self.stage_mutex.lock()
+        new_z = round(new_z, 4)
+        if new_z != self.stage_z:
+            self.stage_z = new_z
+            self.stage.zMoveTo(self.stage_z)
+        self.stage_mutex.unlock()
+        if cSignal_emit:
+            self.moveComplete.emit()
+
+    ## moveStageRel
+    #
+    # @param dz The amount to move the stage from its current position.
+    #
+    def moveStageRel(self, dz, cSignal_emit=False):
+        new_z = self.stage_z + dz
+        self.moveStageAbs(new_z, cSignal_emit)
+
+    def msleep(self, ms):
+        time.sleep(ms/1000) # s to ms
+
+    ## newZCenter
+    #
+    # @param z_center The value to use as the zero or center point of the piezo stage.
+    #
+    def newZCenter(self, z_center):
+        self.z_center = z_center
+
+    ## qpdScan
+    #
+    # Get a reading from the QPD.
+    #
+    # @return [sum signal, x offset, y offset]
+    #
+    def qpdScan(self):
+        return self.qpd.qpdScan()
+
+    ## recenter
+    #
+    # Move the piezo stage back to it's zero position.
+    #
+    def recenter(self):
+        self.moveStageAbs(self.z_center)
+
+    ## recenterPiezo
+    #
+    # Emits the recenteredPiezo signal.
+    #
+    def recenterPiezo(self):
+        #self.emit(QtCore.SIGNAL("recenteredPiezo()"))
+        self.recenteredPiezo.emit()
+
+    ## resetBuffer
+    #
+    # Resets the focus lock buffer.
+    #
+    def resetBuffer(self):
+        self.is_locked_buffer = deque([False]*self.buffer_length)
+        self.is_locked = False
+
+    ## run
+    #
+    # Get the current power and offsets from the QPD. Scan for
+    # sum signal if we are in find.sum mode and emit the
+    # foundSum signal if the sum signal has been found. Otherwise,
+    # if the lock is on, adjust the stage position based on
+    # the offsets & the lock function.
+    #
+    def run(self):
+
+        # self.errors = []
+        # self.rel_moves = []
+        # self.times = []
+
+        while(self.running):
+            [power, x_offset, y_offset] = self.qpdScan()
+
+            self.qpd_mutex.lock()
+            self.sum = power
+
+            if (power > 0):
+                # self.offset = numpy.sqrt(x_offset + y_offset)     #  old  x_offset / power
+                self.offset = (x_offset - y_offset)
+            self.unacknowledged = 0
+
+            # scan for sum signal.
+            # if self.find_sum:
+            #     if (power > self.max_sum):
+            #         self.max_sum = power
+            #         self.max_pos = self.stage_z
+            #     if (self.max_sum > self.requested_sum) and (power < (0.5 * self.max_sum)):
+            #         self.moveStageAbs(self.max_pos)
+            #         self.find_sum = False
+            #         self.foundSum.emit(self.max_sum)
+            #     else:
+            #         if (self.stage_z >= (2 * self.z_center)):
+            #             if (self.max_sum > 0):
+            #                 self.moveStageAbs(self.max_pos)
+            #             else:
+            #                 self.moveStageAbs(self.z_center)
+            #             self.find_sum = False
+            #             self.foundSum.emit(self.max_sum)
+            #         else:
+            #             self.moveStageRel(1.0)
+
+            # # update position, if locked.
+
+            # else:
+            if self.locked and (power > self.sum_min):
+                if self.slow_stage:
+                    self.count += 1
+                    if (self.count > 2):
+                        self.count = 0
+                        self.moveStageRel(self.lock_fn( self.target - self.offset))
+                else:
+                    err =  self.offset - self.target   # old  self.target - self.offset
+                    
+                    rel_move = self.lock_fn(err)
+                    
+                    # print("offset err:{0:.5f}".format(err))
+                    # print("Stage moving to (rel,um):{0:.5f}".format(rel_move))
+                    # current_time = time.time()  # 获取当前时间
+                    # self.times.append(current_time)
+                    # self.errors.append(err)
+                    # self.rel_moves.append(rel_move)
+                     # 记录当前时间、err和rel_move
+                
+
+                    if (abs(rel_move) > 0.002):
+                        self.moveStageRel(rel_move)
+                    
+
+                # Set buffer and determined lock status
+                is_locked_now = (abs(self.offset - self.target) < self.offset_thresh) and (power > self.sum_thresh)
+                self.is_locked_buffer.popleft()
+                self.is_locked_buffer.append(is_locked_now)
+                self.is_locked = (self.is_locked_buffer.count(True) == self.buffer_length) 
+                # 3/4: Kludge to account for periodic jumps in camera based focus lock
+                    
+            #self.emit(QtCore.SIGNAL("controlUpdate(float, float, float, float)"), x_offset, y_offset, power, self.stage_z)
+            # self.controlUpdate.emit(x_offset, y_offset, power, self.stage_z, self.is_locked)
+            self.controlUpdate.emit(self.offset, 0, power, self.stage_z, self.is_locked)
+            self.qpd_mutex.unlock()
+            self.msleep(1)
+
+    ## setBufferLength
+    #
+    # @param buffer_length The length of the is_locked buffer.
+    #
+    def setBufferLength(self, buffer_length):
+        self.qpd_mutex.lock()
+        self.buffer_length = buffer_length
+        self.resetBuffer()
+        self.qpd_mutex.unlock()
+
+    ## setOffsetThreshold
+    #
+    # @param offset_thresh The minimum distance to the lock target to be considered 'in focus'.
+    #
+    def setOffsetThreshold(self, offset_thresh):
+        self.qpd_mutex.lock()
+        self.offset_thresh = offset_thresh
+        self.resetBuffer()
+        self.qpd_mutex.unlock()
+
+    ## setStage
+    #
+    # @param stage A piezo stage like object.
+    #
+    def setStage(self, stage):
+        self.qpd_mutex.lock()
+        self.stage = stage
+        self.qpd_mutex.unlock()
+
+    ## setSumThreshold
+    #
+    # @param sum_thresh The minimum sum value to consider the focus locked.
+    #
+    def setSumThreshold(self, sum_thresh):
+        self.qpd_mutex.lock()
+        self.sum_thresh = sum_thresh
+        self.resetBuffer()
+        self.qpd_mutex.unlock()
+
+    ## setTarget
+    #
+    # @param target The focus lock target.
+    #
+    @hdebug.debug
+    def setTarget(self, target):
+        self.qpd_mutex.lock()
+        self.target = target
+        self.target0 = target
+        self.resetBuffer()
+        self.qpd_mutex.unlock()
+
+    ## startLock
+    #
+    # Start the focus lock.
+    #
+    @hdebug.debug
+    def startLock(self):
+        self.qpd_mutex.lock()
+        self.unacknowledged = 1
+        self.locked = 1
+        self.lock_fn.reset()
+        if self.target == None:
+            self.target = self.offset
+            self.target0 = self.offset
+        print("start FL at target(offset):{0:.4f}".format(self.target))
+        print("start FL at z position:{0:.4f}".format(self.stage_z))
+        self.qpd_mutex.unlock()
+        self.waitForAcknowledgement()
+        self.resetBuffer()
+
+    ## stopLock
+    #
+    # Stop the focus lock.
+    #
+    @hdebug.debug
+    def stopLock(self):
+        self.qpd_mutex.lock()
+        self.unacknowledged = 1
+        if self.target == None:
+            self.targetEnd = 0.0
+        else:
+            self.targetEnd = self.target
+
+        self.locked = 0
+        self.is_locked = False
+        self.target = None
+        self.qpd_mutex.unlock()
+        self.waitForAcknowledgement()
+        self.resetBuffer()
+
+        print("Stop at target:{0:.4f}".format(self.targetEnd))
+        print("Stop at offset:{0:.4f}".format(self.offset))   
+        print(" Stop at z position:{0:.4f}".format(self.stage_z))
+        # self.plot_data()
+
+        # return self.targetEnd
+
+    def plot_data(self):
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MultipleLocator
+
+        # 使用matplotlib绘制图表
+        plt.figure(figsize=(15, 20))
+
+        # 绘制err随时间变化的曲线
+        plt.subplot(2, 1, 1)  # 上半部分绘制err图
+        plt.plot(self.times,self.errors, label="Error (err)")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Error")
+        plt.title("Error (err) vs Time")
+         # 设置纵坐标的最小分度为 0.002
+        plt.gca().yaxis.set_major_locator(MultipleLocator(0.005))  # 设置y轴刻度间隔为0.005
+        plt.legend()
+
+        # 绘制rel_move随时间变化的曲线
+        plt.subplot(2, 1, 2)  # 下半部分绘制rel_move图
+        plt.plot(self.times,self.rel_moves, label="Relative Movement (rel_move)", color='r')
+        plt.xlabel("Time (s)")
+        plt.ylabel("Relative Movement (um)")
+        plt.title("Relative Movement (rel_move) vs Time")
+        plt.gca().yaxis.set_major_locator(MultipleLocator(0.001))  # 设置y轴刻度间隔为0.002
+        plt.legend()
+
+        # 显示图表
+        plt.tight_layout()  # 自动调整子图之间的间距
+        plt.show()
+
+    def startScanning(self,startZRel,endZRel,stepZ, contilock = False,scanFrames=1, trigger_exposure_ms=100):
+        self.scanning = True
+        self.scanningSignal.emit(self.scanning)
+        self.stopScan = False
+        completed = True
+        
+        if self.locked:
+            TargetEnd = self.getLockTarget()
+            self.stopLock()
+
+            completed = self.handleScanning(
+                startZRel,
+                endZRel,
+                stepZ,
+                scanFrames,
+                trigger_exposure_ms=trigger_exposure_ms,
+            )
+
+            self.setTarget(TargetEnd)
+            
+            print("scanning complete, continue lock")
+            self.startLock()
+            
+        else:
+            completed = self.handleScanning(
+                startZRel,
+                endZRel,
+                stepZ,
+                scanFrames,
+                trigger_exposure_ms=trigger_exposure_ms,
+            )
+            print("scanning complete")
+        
+        self.scanning = False
+        self.scanningSignal.emit(self.scanning)
+        return completed
+
+
+    def handleScanning(self,startZRel,endZRel,stepZ,scanFrames=1, framesToPause=20, trigger_exposure_ms=100):
+        # print("handleScanning run")
+        print("Frames per pos: ",int(scanFrames))
+        center_Z = self.stage_z
+
+        if stepZ == 0:
+            print("Step size is 0, aborting scan")
+            return False
+        else:
+            zvals = center_Z + numpy.arange(startZRel,endZRel+stepZ,stepZ)
+
+        def addZval(z_val):
+            self.zPauses.append(z_val)
+            self.max_zpauses += 1        
+        
+        self.zPauses = []
+        self.max_zpauses = 0
+        completed = True
+
+        for zval in zvals:
+            if not self.stopScan:
+                self.moveStageAbs(zval)
+                print("current z position: ",self.stage_z)
+
+                # 外部触发且单点多次曝光时，python程序所耗时间很短
+                # 需程序显式留出读取时间
+                
+                # 信号的低电平已包含读出时间
+                
+                self.scanNIDaqEmitExp2(nframes=scanFrames, exp_t=trigger_exposure_ms)
+                #
+                # for i in range(framesToPause):
+                #     addZval(0.0)
+                # self.max_zpauses += 1
+
+                [power, x_offset, y_offset] = self.qpdScan()
+                self.qpd_mutex.lock()
+                if (power > 0):
+                    self.offset = (x_offset - y_offset)
+                    # self.offset = numpy.sqrt(x_offset + y_offset)     #  old  x_offset / power
+
+                self.controlUpdate.emit(self.offset, 0, power, self.stage_z, self.is_locked)
+                self.qpd_mutex.unlock()
+                print("update signal sent")
+
+            else:
+                self.stopScan = False
+                completed = False
+                break
+
+        self.moveStageAbs(center_Z)
+        return completed
+        
+
+    def scanNIDaqEmit(self):
+        with nidaqmx.Task() as task:
+            datas = [False,True, False]
+            task.do_channels.add_do_chan("Dev1/port0/line2", line_grouping=LineGrouping.CHAN_PER_LINE)
+            task.start()
+            task.write(datas)
+            task.stop()
+
+    # exposure time in ms
+    # 使用sleep控制DAQ信号输出时间并不准确
+
+    def scanNIDaqEmitExp(self,exp=100):
+        with nidaqmx.Task() as task:
+            
+            task.do_channels.add_do_chan("Dev1/port0/line2", line_grouping=LineGrouping.CHAN_PER_LINE)
+            task.start()
+            task.write([True])
+            self.msleep(exp)
+            task.write([False])
+            task.stop()
+
+    def scanNIDaqEmitExp2(self,nframes=1,exp_t=100):
+        
+        read_time= 20  # ms
+        num_pulse = int(nframes)
+        t_timeout = num_pulse * 2
+        with nidaqmx.Task() as task:
+            channel = task.co_channels.add_co_pulse_chan_time(
+                "Dev1/ctr0", idle_state=Level.LOW, initial_delay=0.0, low_time=read_time/1000, high_time=exp_t/1000
+            )
+            channel.co_pulse_term = "/Dev1/PFI0"
+
+            task.timing.cfg_implicit_timing(
+                sample_mode=AcquisitionType.FINITE,
+                samps_per_chan=num_pulse  # 设置生成的脉冲数量
+            )
+            task.start()
+            task.wait_until_done(timeout=t_timeout)
+            task.stop()
+    
+    def stopScanning(self):
+        self.stopScan = True
+
+    ## stopThread
+    #
+    # Stop the focus lock control thread.
+    #
+    @hdebug.debug
+    def stopThread(self):
+        self.running = 0
+
+    ## waitForAcknowledgement
+    #
+    # Blocks until the next iteration of the focus lock control thread.
+    #
+    @hdebug.debug
+    def waitForAcknowledgement(self):
+        while(self.unacknowledged):
+            self.msleep(2)
+
+
+## MotorStageQPDThread
+#
+# Motorized Z, Piezo Stage and QPD Control Thread Class.
+#
+# This is a PyQt thread for controlling a motorized z stage,
+# a piezo stage (for focusing) and getting the current
+# position reading from the QPD. It is a subclass of the
+# stageQPDThread that also controls a motorized focus.
+#
+# motor is a class with the following methods:
+#
+#   zMoveRelative(z)
+#      Move the stage up or down by the amount z in um.
+#
+class MotorStageQPDThread(StageQPDThread):
+
+    ## __init__
+    #
+    # @param qpd A QPD like object.
+    # @param stage A piezo stage control object.
+    # @param motor A motorized stage Z control object.
+    # @param lock_fn A function to use in the focus feedback correction loop.
+    # @param min_sum The sum below which QPD signal will be considered to have been lost.
+    # @param z_center The center position of the piezo.
+    # @param slow_stage (Optional) True/False is communication with the piezo stage slow.
+    # @param parent (Optional) The PyQt parent of this object.
+    #
+    @hdebug.debug
+    def __init__(self, qpd, stage, motor, lock_fn, min_sum, z_center, buffer_length, offset_thresh, slow_stage = False, parent = None):
+        StageQPDThread.__init__(self,
+                                qpd,
+                                stage,
+                                lock_fn,
+                                min_sum,
+                                z_center,
+                                buffer_length,
+                                offset_thresh,
+                                slow_stage = slow_stage,
+                                parent = parent)
+        self.motor = motor
+
+    ## recenterPiezo
+    #
+    # This moves the focus lock motor and piezo by the same magnitude in opposite
+    # directions by the amount of the current piezo offset from its zero position.
+    # The net effect of this is to recenter the piezo to it's zero position.
+    #
+    def recenterPiezo(self):
+        print("recenter:", self.stage_z, self.z_center)
+        if self.motor.live:
+            offset = self.z_center - self.stage_z
+            self.moveStageAbs(self.z_center)
+            self.motor.zMoveRelative(offset)
+        StageQPDControl.QControlThread.recenterPiezo(self)
+
+
+## StageCamThread
+#
+# USB camera monitoring and stage control thread.
+#
+# This is a PyQt thread for controlling the z stage position
+# and getting the current position reading from a USB camera.
+# It is a subclass of stageQPDThread.
+#
+# cam is a class that uses a (USB) camera to emulate the readout
+#    that you would normally get from a QPD. It has the following 
+#    methods:
+#
+#   adjustCamera(dx, dy)
+#      Adjust the AOI of the camera.
+#
+#   getImage()
+#      Returns the current image from the USB camera as a numpy.uint8
+#      2D array.
+#
+#   qpdScan()
+#      Return the current reading from the camera in the same format
+#      as we would have gotten from a QPD, [power, x_offset, y_offset]
+#
+#   shutDown()
+#      Perform whatever cleanup is necessary to stop the qpd cleanly
+#
+class StageCamThread(StageQPDThread):
+
+    ## __init__
+    #
+    # @param cam A USB camera object.
+    # @param stage A piezo stage control object.
+    # @param lock_fn A function to use in the focus feedback correction loop.
+    # @param min_sum The sum below which QPD signal will be considered to have been lost.
+    # @param z_center The center position of the piezo.
+    # @param slow_stage (Optional) True/False is communication with the piezo stage slow.
+    # @param parent (Optional) The PyQt parent of this object.
+    #
+    @hdebug.debug
+    def __init__(self, cam, stage, lock_fn, min_sum, z_center, buffer_length, offset_thresh, slow_stage = False, parent = None):
+        super().__init__(cam,
+                        stage,
+                        lock_fn,
+                        min_sum,
+                        z_center,
+                        buffer_length,
+                        offset_thresh,
+                        slow_stage = slow_stage,
+                        parent = parent)
+        self.cam = cam
+        self.cam_data = False
+        self.cam_mutex = QtCore.QMutex()
+        
+    ## adjustCamera
+    #
+    # This moves the AOI of the camera.
+    #
+    # @param dx The amount to move the AOI in x (pixels).
+    # @param dy The amount to move the AOI in y (pixels).
+    #
+    @hdebug.debug
+    def adjustCamera(self, dx, dy):
+        self.qpd_mutex.lock()
+        self.cam.adjustAOI(dx, dy)
+        self.qpd_mutex.unlock()
+
+    ## adjustOffset
+    #
+    # This changes the zero point for the focus lock offset value that is returned by the camera.
+    #
+    # @param dx The amount to change the zero point by.
+    #
+    @hdebug.debug
+    def adjustOffset(self, dx):
+        self.qpd_mutex.lock()
+        self.cam.adjustZeroDist(dx)
+        self.qpd_mutex.unlock()
+
+    ## changeFitMode
+    #
+    # Changes how the camera fits the data to determine the focus lock offset.
+    #
+    # @param mode 1 = Gaussian fit, 2 = Moment based calculation.
+    #
+    @hdebug.debug
+    def changeFitMode(self, mode):
+        self.qpd_mutex.lock()
+        self.cam.changeFitMode(mode)
+        self.qpd_mutex.unlock()
+
+    ## getImage
+    #
+    # Returns the image from the camera and fit position of the two spots.
+    #
+    # @return [image, xoff1, yoff1, xoff2, yoff2]
+    #
+    def getImage(self):
+        self.cam_mutex.lock()
+        data = self.cam_data
+        self.cam_mutex.unlock()
+        return data
+
+    ## qpdScan
+    #
+    # Get a reading from the QPD.
+    #
+    # @return [sum signal, x offset, y offset]
+    #
+    def qpdScan(self):
+        self.qpd_mutex.lock()
+        data = self.cam.qpdScan()
+        self.qpd_mutex.unlock()
+
+        self.cam_mutex.lock()
+        self.cam_data = list(self.cam.getImage())
+        self.cam_data[0] = self.cam_data[0].copy()
+        self.cam_mutex.unlock()
+        return data
+
+#
+# The MIT License
+#
+# Copyright (c) 2014 Zhuang Lab, Harvard University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#

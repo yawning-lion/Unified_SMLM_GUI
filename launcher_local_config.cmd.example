@@ -1,0 +1,18 @@
+@echo off
+rem Copy this file to launcher_local_config.cmd and edit the values as needed.
+rem Leave a line commented out if you do not want to override that setting.
+
+rem Optional Python interpreter override.
+rem set "UNIFIED_SMLM_PYTHON=C:\Users\YourName\anaconda3\envs\gui_smlm_unified\python.exe"
+
+rem Optional Micro-Manager root override.
+rem set "SMLM_MM_ROOT=C:\Program Files\Micro-Manager-2.0"
+
+rem Optional Micro-Manager cfg override.
+rem set "SMLM_MM_CFG=C:\path\to\GXD_sCMOS_XY_stage_250221.cfg"
+
+rem Optional save root override.
+rem set "SMLM_SAVE_ROOT=D:\Research_RSC"
+
+rem Optional alternate system_config.json override.
+rem set "SMLM_SYSTEM_CONFIG=C:\path\to\system_config.json"

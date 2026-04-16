@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<hardware>
+
+  <!-- The UI mode, this is either "single" (window) or "detached" -->
+  <ui_mode type="string">single</ui_mode>
+  <!-- <ui_mode type="string">detached</ui_mode> -->
+
+  <!-- Camera control. -->
+  <control>
+    <module_name type="string">noneCameraControl</module_name>
+    <parameters>
+      <roll type="float">0.5</roll>
+    </parameters>
+  </control>
+
+  <!-- Camera display. -->
+  <display>
+    <module_name type="string">cameraWidgets</module_name>
+    <class_name type="string">PyCameraWidget</class_name>
+  </display>
+  
+  <!--      Define the modules to use for this setup.  -->
+  <modules>
+
+    <!-- Focus lock control GUI. -->
+    <focuslock>
+      <class_name type="string">AFocusLockZ</class_name>
+      <module_name type="string">focusLock.IX83FocusLock</module_name>
+      <configuration>
+        <lock_modes type="string">NoLockMode,AutoLockMode,AlwaysOnLockMode,OptimalLockMode,CalibrationLockMode</lock_modes>
+        <qpd type="string">uc480_camera</qpd>
+        <z_stage type="string">pi_zstage</z_stage>
+        <parameters>
+          <!-- <find_sum>
+            <step_size type="float">0.001</step_size>
+          </find_sum> -->
+          <locked>
+            <buffer_length type="int">5</buffer_length>
+            <offset_threshold type="float">0.02</offset_threshold>
+          </locked>
+          <jump_size type="float">0.1</jump_size>
+        </parameters>
+      </configuration>
+    </focuslock>
+
+
+  </modules>
+  
+</hardware>

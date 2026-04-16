@@ -1,0 +1,253 @@
+{
+    "notes":  {
+                  "description":  "Unified SMLM GUI central configuration. Edit this file to change GUI defaults, preset defaults, and bundled hardware metadata. Restart the GUI after editing.",
+                  "admin_notice":  "This file is intended to be writable only by Windows administrators."
+              },
+    "paths":  {
+                  "micromanager_root":  "C:/Program Files/Micro-Manager-2.0",
+                  "micromanager_cfg":  "assets/micromanager/GXD_sCMOS_XY_stage_250221.cfg",
+                  "roi_file":  "assets/roi/0512-0512.roi",
+                  "teledyne_bundle_root":  "assets/teledyne",
+                  "teledyne_exe":  "assets/teledyne/TeledyneCam.exe",
+                  "teledyne_base_config":  "assets/teledyne/parameters.base.xml",
+                  "teledyne_runtime_config":  "runtime/teledyne/parameters.runtime.xml",
+                  "teledyne_aotf_calibration":  "assets/teledyne/aotf_analog_calib.csv",
+                  "bin_dir":  "assets/bin",
+                  "prior_sdk_dll":  "assets/bin/PriorScientificSDK.dll",
+                  "uc480_dll":  "assets/bin/uc480_64.dll",
+                  "uc480_tools_dll":  "assets/bin/uc480_tools_64.dll",
+                  "focuslock_base_xml":  "vendor/focuslock_ix83/xml/IX83_default.xml",
+                  "focuslock_runtime_xml":  "runtime/focuslock/IX83_default.runtime.xml",
+                  "focuslock_output_dir":  "runtime/focuslock/data",
+                  "focuslock_log_file":  "runtime/focuslock/logs/image_log.txt"
+              },
+    "defaults":  {
+                     "acquisition":  {
+                                         "sample_name":  "",
+                                         "save_prefix":  "",
+                                         "save_root":  "captures",
+                                         "trial_index":  0,
+                                         "auto_advance_trial":  true,
+                                         "roi_name":  "",
+                                         "exposure_ms":  25.0,
+                                         "trigger_mode":  "Internal",
+                                         "saving_format":  "Image Stack File",
+                                         "widefield_frames":  10,
+                                         "storm_total_frames":  20000
+                                     },
+                     "illumination":  {
+                                          "channel_642_enabled":  true,
+                                          "laser_642_setpoint":  100.0,
+                                          "aotf_642_enabled":  true,
+                                          "aotf_642_setpoint":  4.4,
+                                          "modulation_mode":  "Independent mode",
+                                          "safe_shutdown_setpoint":  100.0
+                                      },
+                     "focus_lock":  {
+                                        "mode":  "Always On",
+                                        "locked":  false,
+                                        "jump_offset_um":  10.0,
+                                        "z_start_um":  -4.5,
+                                        "z_end_um":  4.5,
+                                        "depth_count":  16,
+                                        "frames_per_depth_per_round":  100,
+                                        "qpd_zcenter_um":  200.0,
+                                        "qpd_scale":  1.0,
+                                        "qpd_sum_min":  25.0,
+                                        "qpd_sum_max":  256.0,
+                                        "lock_step_um":  0.04,
+                                        "is_locked_buffer_length":  1,
+                                        "is_locked_offset_thresh":  0.1,
+                                        "prior_com_port":  20
+                                    },
+                     "bleach":  {
+                                    "duration_minutes":  4.0,
+                                    "bleach_laser_power_mw":  1000.0,
+                                    "bleach_aotf_value":  100.0,
+                                    "return_laser_power_mw":  400.0
+                                },
+                     "state":  {
+                                   "inspection_mode":  false,
+                                   "active_preset":  "ROI Preview",
+                                   "preview_running":  false,
+                                   "theme":  "Light",
+                                   "session_timestamp_prefix":  ""
+                               }
+                 },
+    "runtime":  {
+                    "external_trigger_arm_delay_seconds":  0.35
+                },
+    "preset_defaults":  {
+                            "ROI Preview":  {
+                                                "trigger_mode":  "Internal",
+                                                "saving_format":  "Image Stack File",
+                                                "modulation_mode":  "Independent mode",
+                                                "channel_642_enabled":  true,
+                                                "aotf_642_enabled":  true,
+                                                "laser_642_setpoint_max":  120.0,
+                                                "aotf_642_setpoint":  4.4,
+                                                "focus_mode":  "Always On"
+                                            },
+                            "Widefield Test":  {
+                                                   "trigger_mode":  "Internal",
+                                                   "saving_format":  "Image Stack File",
+                                                   "widefield_frames":  10,
+                                                   "modulation_mode":  "Independent mode",
+                                                   "channel_642_enabled":  true,
+                                                   "aotf_642_enabled":  true,
+                                                   "laser_642_setpoint":  150.0,
+                                                   "aotf_642_setpoint":  4.4,
+                                                   "focus_mode":  "Always On"
+                                               },
+                            "STORM 2D":  {
+                                             "trigger_mode":  "Internal",
+                                             "saving_format":  "Separate Image Files",
+                                             "modulation_mode":  "one-chan FSK mode",
+                                             "channel_642_enabled":  true,
+                                             "aotf_642_enabled":  true,
+                                             "laser_642_setpoint":  400.0,
+                                             "aotf_642_setpoint":  4.4,
+                                             "focus_mode":  "Always On"
+                                         },
+                            "Whole-Cell Z Scan":  {
+                                                      "trigger_mode":  "External",
+                                                      "saving_format":  "Separate Image Files",
+                                                      "modulation_mode":  "one-chan FSK mode",
+                                                      "channel_642_enabled":  true,
+                                                      "aotf_642_enabled":  true,
+                                                      "laser_642_setpoint":  400.0,
+                                                      "aotf_642_setpoint":  4.4,
+                                                      "focus_mode":  "Lock + Z Scan Calibration",
+                                                      "z_start_um":  -4.5,
+                                                      "z_end_um":  4.5,
+                                                      "depth_count":  16,
+                                                      "frames_per_depth_per_round":  100
+                                                  }
+                        },
+    "hardware":  {
+                     "teledyne":  {
+                                      "focus_lock":  {
+                                                         "cam_model":  "DCC",
+                                                         "piezo_comm":  "RS232",
+                                                         "piezo_para":  "COM4",
+                                                         "aoi_x":  400,
+                                                         "aoi_y":  446,
+                                                         "aoi_w":  300,
+                                                         "aoi_h":  300,
+                                                         "target_fps":  50,
+                                                         "img_exposure_us":  10000,
+                                                         "ref_pos_mm":  0.2,
+                                                         "kp":  0.1,
+                                                         "ki":  0.08,
+                                                         "kd":  0.001,
+                                                         "pix_conve_ratio":  0.001,
+                                                         "spot_size":  41,
+                                                         "spot_amp":  10.0,
+                                                         "spot_x":  21.0,
+                                                         "spot_y":  21.0,
+                                                         "spot_width":  3.0,
+                                                         "spot_offset":  10.0
+                                                     },
+                                      "lasers":  {
+                                                     "405":  {
+                                                                 "name":  "405",
+                                                                 "color":  "#8200c8",
+                                                                 "model":  "Coherent_OBIS",
+                                                                 "mode":  "APC",
+                                                                 "trigger_enable":  true,
+                                                                 "is_enable":  true,
+                                                                 "min_power_mw":  0,
+                                                                 "max_power_mw":  365,
+                                                                 "min_current_ma":  0,
+                                                                 "max_current_ma":  5000,
+                                                                 "serial_port":  "COM15",
+                                                                 "shg_temp_c":  64,
+                                                                 "controller":  "NI",
+                                                                 "ao_port":  "None",
+                                                                 "ao_freq_hz":  0,
+                                                                 "ao_chan":  0,
+                                                                 "ao_pwr":  100
+                                                             },
+                                                     "488":  {
+                                                                 "name":  "488",
+                                                                 "color":  "#00f7ff",
+                                                                 "model":  "MPB",
+                                                                 "mode":  "APC",
+                                                                 "trigger_enable":  false,
+                                                                 "is_enable":  true,
+                                                                 "min_power_mw":  30,
+                                                                 "max_power_mw":  500,
+                                                                 "min_current_ma":  0,
+                                                                 "max_current_ma":  4999,
+                                                                 "serial_port":  "COM9",
+                                                                 "shg_temp_c":  64,
+                                                                 "controller":  "AOTF_GH",
+                                                                 "ao_port":  "USB",
+                                                                 "ao_freq_hz":  131.803,
+                                                                 "ao_chan":  2,
+                                                                 "ao_pwr":  8973
+                                                             },
+                                                     "560":  {
+                                                                 "name":  "560",
+                                                                 "color":  "#65ff00",
+                                                                 "model":  "MPB",
+                                                                 "mode":  "APC",
+                                                                 "trigger_enable":  false,
+                                                                 "is_enable":  true,
+                                                                 "min_power_mw":  100,
+                                                                 "max_power_mw":  1100,
+                                                                 "min_current_ma":  0,
+                                                                 "max_current_ma":  5000,
+                                                                 "serial_port":  "COM6",
+                                                                 "shg_temp_c":  64,
+                                                                 "controller":  "AOTF_GH",
+                                                                 "ao_port":  "USB",
+                                                                 "ao_freq_hz":  109.55,
+                                                                 "ao_chan":  1,
+                                                                 "ao_pwr":  3513
+                                                             },
+                                                     "647":  {
+                                                                 "name":  "647",
+                                                                 "color":  "#ff0000",
+                                                                 "model":  "MPB",
+                                                                 "mode":  "APC",
+                                                                 "trigger_enable":  false,
+                                                                 "is_enable":  true,
+                                                                 "min_power_mw":  100,
+                                                                 "max_power_mw":  1100,
+                                                                 "min_current_ma":  0,
+                                                                 "max_current_ma":  5000,
+                                                                 "serial_port":  "COM18",
+                                                                 "shg_temp_c":  64,
+                                                                 "controller":  "AOTF_GH",
+                                                                 "ao_port":  "USB",
+                                                                 "ao_freq_hz":  91.054,
+                                                                 "ao_chan":  0,
+                                                                 "ao_pwr":  3513
+                                                             }
+                                                 },
+                                      "daq":  {
+                                                  "device_name":  "Dev1",
+                                                  "chan_out_aotf_blank":  "Dev1/port0/line7",
+                                                  "chan_out_aotf_mod_1":  "Dev1/ao1",
+                                                  "chan_out_aotf_mod_2":  "Dev1/ao2",
+                                                  "chan_out_aotf_mod_3":  "Dev1/ao3",
+                                                  "chan_out_405_laser_dig":  "Dev1/port0/line5",
+                                                  "chan_out_405_laser_mod":  "",
+                                                  "cam_trigger_chan":  "Dev1/ctr0",
+                                                  "t1":  100,
+                                                  "t2":  10,
+                                                  "t3":  5,
+                                                  "cam_expose_chan":  "Dev1/PFI0",
+                                                  "inter_tans_chan":  "Dev1/PFI1",
+                                                  "inter_start_chan":  "Dev1/PFI2",
+                                                  "expose_laser_chan":  "Dev1/port0/line0:7",
+                                                  "focus_lock_laser_chan":  "Dev1/ctr1",
+                                                  "focus_lock_cam_xy_chan":  "Dev1/port0/line8",
+                                                  "focus_lock_cam_z_chan":  "Dev1/port0/line9",
+                                                  "gh_aotf_fsk_blank":  "Dev1/port0/line0",
+                                                  "laser_digital_chan":  "Dev1/port0/line16:23"
+                                              }
+                                  }
+                 }
+}

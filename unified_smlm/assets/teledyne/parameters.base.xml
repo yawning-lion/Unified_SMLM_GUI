@@ -1,0 +1,131 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<para>
+    <focusLock>
+        <camModel>DCC</camModel>
+        <!--CS is new thorlabs camera, DCC is old one-->
+        <piezoComm>RS232</piezoComm>
+        <!--RS232 or USB-->
+        <piezoPara>COM4</piezoPara>
+        <!--eg. RS232(COM8); USB(PI E-709) -->
+        <aoi_x>400</aoi_x>
+        <aoi_y>446</aoi_y>
+        <aoi_w>300</aoi_w>
+        <aoi_h>300</aoi_h>
+        <targetFPS>50</targetFPS>
+        <!--only for DCC camera -->
+        <imgExposure>10000</imgExposure>
+        <!--only for CS camera, us -->
+        <refPos>0.20</refPos>
+        <!-- reset position UNIT: mm-->
+        <Kp>0.1</Kp>
+        <Ki>0.08</Ki>
+        <Kd>0.001</Kd>
+        <pixConveRatio>0.001</pixConveRatio>
+        <!-- pixel to milimeter ratio -->
+        <spotSize>41</spotSize>
+        <spotAmp>10.0</spotAmp>
+        <spotX>21.0</spotX>
+        <spotY>21.0</spotY>
+        <spotWidth>3.0</spotWidth>
+        <spotOffset>10.0</spotOffset>
+    </focusLock>
+    <lasers>
+        <laser id="405">
+            <name>405</name>
+            <color>#8200c8</color>
+            <model>Coherent_OBIS</model>
+            <mode>APC</mode>
+            <triggerEnable>1</triggerEnable>
+            <isEnable>1</isEnable>
+            <minPower>0</minPower>
+            <maxPower>365</maxPower>
+            <minCurrent>0</minCurrent>
+            <maxCurrent>5000</maxCurrent>
+            <serialPort>COM15</serialPort>
+            <shgTemp>64</shgTemp>
+            <controller>NI</controller>
+            <AO_port>None</AO_port>
+            <AO_freq>0</AO_freq>
+            <AO_chan>0</AO_chan>
+            <AO_pwr>100</AO_pwr>
+        </laser>
+        <laser id="488">
+            <name>488</name>
+            <color>#00f7ff</color>
+            <model>MPB</model>
+            <mode>APC</mode>
+            <triggerEnable>0</triggerEnable>
+            <isEnable>1</isEnable>
+            <minPower>30</minPower>
+            <maxPower>500</maxPower>
+            <minCurrent>0</minCurrent>
+            <maxCurrent>4999</maxCurrent>
+            <serialPort>COM9</serialPort>
+            <shgTemp>64</shgTemp>
+            <controller>AOTF_GH</controller>
+            <AO_port>USB</AO_port>
+            <AO_freq>131.8030</AO_freq>
+            <AO_chan>2</AO_chan>
+            <AO_pwr>8973</AO_pwr>
+        </laser>
+        <laser id="560">
+            <name>560</name>
+            <color>#65ff00</color>
+            <model>MPB</model>
+            <mode>APC</mode>
+            <triggerEnable>0</triggerEnable>
+            <isEnable>1</isEnable>
+            <minPower>100</minPower>
+            <maxPower>1100</maxPower>
+            <minCurrent>0</minCurrent>
+            <maxCurrent>5000</maxCurrent>
+            <serialPort>COM6</serialPort>
+            <shgTemp>64</shgTemp>
+            <controller>AOTF_GH</controller>
+            <AO_port>USB</AO_port>
+            <AO_freq>109.5500</AO_freq>
+            <AO_chan>1</AO_chan>
+            <AO_pwr>3513</AO_pwr>
+        </laser>
+        <laser id="647">
+            <name>647</name>
+            <color>#ff0000</color>
+            <model>MPB</model>
+            <mode>APC</mode>
+            <triggerEnable>0</triggerEnable>
+            <isEnable>1</isEnable>
+            <minPower>100</minPower>
+            <maxPower>1100</maxPower>
+            <minCurrent>0</minCurrent>
+            <maxCurrent>5000</maxCurrent>
+            <serialPort>COM18</serialPort>
+            <shgTemp>64</shgTemp>
+            <controller>AOTF_GH</controller>
+            <AO_port>USB</AO_port>
+            <AO_freq>91.054</AO_freq>
+            <AO_chan>0</AO_chan>
+            <AO_pwr>3513</AO_pwr>
+        </laser>
+    </lasers>
+    <NI-DAQmx>
+        <deviceName>Dev1</deviceName>
+        <chanOut_aotfBlank>Dev1/port0/line7</chanOut_aotfBlank>
+        <chanOut_aotfMod_1>Dev1/ao1</chanOut_aotfMod_1>
+        <chanOut_aotfMod_2>Dev1/ao2</chanOut_aotfMod_2>
+        <chanOut_aotfMod_3>Dev1/ao3</chanOut_aotfMod_3>
+        <chanOut_405LaserDig>Dev1/port0/line5</chanOut_405LaserDig>
+        <camTriggerChan>Dev1/ctr0</camTriggerChan>
+        <t1>100</t1>
+        <t2>10</t2>
+        <t3>5</t3>
+        <camExposeChan>Dev1/PFI0</camExposeChan>
+        <interTansChan>Dev1/PFI1</interTansChan>
+        <interStartChan>Dev1/PFI2</interStartChan>
+        <exposeLaserChan>Dev1/port0/line0:7</exposeLaserChan>
+        <focusLockLaserChan>Dev1/ctr1</focusLockLaserChan>
+        <focusLockCamXYchan>Dev1/port0/line8</focusLockCamXYchan>
+        <focusLockCamZchan>Dev1/port0/line9</focusLockCamZchan>
+        <GH_AOTF_FSK_BLANK>Dev1/port0/line0</GH_AOTF_FSK_BLANK>
+        <laserDigitalChan>Dev1/port0/line16:23</laserDigitalChan>
+    </NI-DAQmx>
+</para>

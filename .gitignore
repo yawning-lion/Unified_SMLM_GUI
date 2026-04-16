@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+unified_smlm/runtime/
+captures/
+data/
+
+launcher_local_config.cmd
+*.lnk
+
+.vscode/
+.idea/
